@@ -1,12 +1,19 @@
+// Configuration and globals
 let isActiveTranslator = false;
-
-chrome.storage.sync.get("translator_on", ({ translator_on }) => {
-  isActiveTranslator = translator_on;
-});
-
-// Global translator instances
 const translators = {};
 
+// Define selector for all text elements we want to translate
+const TEXT_ELEMENT_SELECTOR =
+  "p, h1, h2, h3, h4, h5, h6, span, li, td, th, figcaption, blockquote";
+
+// Initialize state from storage
+function initializeState() {
+  chrome.storage.sync.get("translator_on", ({ translator_on }) => {
+    isActiveTranslator = translator_on;
+  });
+}
+
+// Language detection
 async function detectLanguage(text) {
   if (!("LanguageDetector" in self)) {
     throw new Error("LanguageDetector is not supported.");
@@ -23,135 +30,117 @@ async function detectLanguage(text) {
   return detectedLanguage;
 }
 
-async function translate(text, transElem) {
-  if ("Translator" in self) {
-    try {
-      const sourceLanguage = await detectLanguage(text);
-      const targetLanguage = sourceLanguage === "en" ? "vi" : "en";
-      const translatorKey = `${sourceLanguage}-${targetLanguage}`;
+// Get or create translator instance
+async function getTranslatorInstance(sourceLanguage, targetLanguage) {
+  const translatorKey = `${sourceLanguage}-${targetLanguage}`;
 
-      const availability = await Translator.availability({
-        sourceLanguage,
-        targetLanguage,
-      });
-      const isUnavailable = availability === "unavailable";
+  // Check availability
+  const availability = await Translator.availability({
+    sourceLanguage,
+    targetLanguage,
+  });
 
-      if (isUnavailable) {
-        console.log(
-          `${sourceLanguage} - ${targetLanguage} pair is not supported.`
-        );
-        transElem.textContent =
-          "Translation not available for this language pair.";
-        return;
-      }
+  if (availability === "unavailable") {
+    console.log(`${sourceLanguage} - ${targetLanguage} pair is not supported.`);
+    return null;
+  }
 
-      // Use existing translator or create a new one
-      let translator;
-      if (translators[translatorKey]) {
-        translator = translators[translatorKey];
-      } else {
-        translator = await Translator.create({
-          sourceLanguage,
-          targetLanguage,
-        });
-        // Store the translator for future use
-        translators[translatorKey] = translator;
-      }
+  // Use existing translator or create a new one
+  if (!translators[translatorKey]) {
+    translators[translatorKey] = await Translator.create({
+      sourceLanguage,
+      targetLanguage,
+    });
+  }
 
-      // Start with loading indicator
-      transElem.textContent = "...";
+  return translators[translatorKey];
+}
 
-      // Create buffer to accumulate translated text
-      let translatedText = "";
-
-      // Use the streaming API
-      const stream = translator.translateStreaming(text);
-      for await (const chunk of stream) {
-        translatedText += chunk;
-        // transElem.textContent = translatedText;
-
-        // Before inserting
-        if (
-          !hasDuplicateTranslation(transElem, translatedText) &&
-          !isNestedDuplicate(transElem, translatedText)
-        ) {
-          // Insert translated paragraph as needed
-          transElem.textContent = translatedText;
-        }
-      }
-
-      return translatedText;
-    } catch (err) {
-      console.error(err.name, err.message);
-      transElem.textContent = "An error occurred. Please try again.";
-      return "An error occurred. Please try again.";
+// Translation function
+async function translateText(
+  text,
+  sourceLanguage,
+  targetLanguage,
+  updateCallback
+) {
+  try {
+    if (!("Translator" in self)) {
+      throw new Error("Translator is not supported.");
     }
+
+    const translator = await getTranslatorInstance(
+      sourceLanguage,
+      targetLanguage
+    );
+
+    if (!translator) {
+      return "Translation not available for this language pair.";
+    }
+
+    let translatedText = "";
+
+    // Use the streaming API
+    const stream = translator.translateStreaming(text);
+    for await (const chunk of stream) {
+      translatedText += chunk;
+
+      // Call update callback if provided
+      if (updateCallback) {
+        updateCallback(translatedText);
+      }
+    }
+
+    return translatedText;
+  } catch (err) {
+    console.error("Translation error:", err);
+    return "An error occurred. Please try again.";
   }
 }
 
-async function translateElement(element) {
-  const original = element.textContent.trim();
-  // Skip empty elements or very short content
-  if (!original || original.length < 2) return;
+// DOM manipulation to add translations
+function createTranslationElement(originalElement) {
+  // Determine the right tag to use
+  const tagName = originalElement.tagName === "LI" ? "LI" : "P";
 
-  const alreadyTranslated =
-    element.nextElementSibling &&
-    element.nextElementSibling.classList.contains("translated");
-  if (alreadyTranslated) return;
-
-  // Create the translation element with the same tag as the original
-  const tagName = element.tagName === "LI" ? "LI" : "P";
   const transElem = document.createElement(tagName);
   transElem.className = "translated";
   transElem.style.color = "#00695c";
   transElem.textContent = "..."; // Initial loading indicator
 
+  return transElem;
+}
+
+// Insert translation element into the page
+function insertTranslationElement(originalElement, translationElement) {
   // For list items, append to the list rather than after the element
-  if (element.tagName === "LI") {
-    const parentList = element.parentElement;
+  if (originalElement.tagName === "LI") {
+    const parentList = originalElement.parentElement;
     if (
       parentList &&
       (parentList.tagName === "UL" || parentList.tagName === "OL")
     ) {
-      parentList.insertBefore(transElem, element.nextSibling);
+      parentList.insertBefore(translationElement, originalElement.nextSibling);
     } else {
-      element.insertAdjacentElement("afterend", transElem);
+      originalElement.insertAdjacentElement("afterend", translationElement);
     }
   } else {
-    element.insertAdjacentElement("afterend", transElem);
-  }
-
-  const lang = await detectLanguage(original);
-  if (lang === "en" || lang === "vi") {
-    // Pass the translation element to update it during streaming
-    await translate(original, transElem);
-  } else {
-    // Remove the translation element if language is not supported
-    transElem.remove();
+    originalElement.insertAdjacentElement("afterend", translationElement);
   }
 }
 
-// Define selector for all text elements we want to translate
-const TEXT_ELEMENT_SELECTOR =
-  "p, h1, h2, h3, h4, h5, h6, span, li, td, th, figcaption, blockquote";
-
-function getMainArticleParagraphs() {
-  const mainSelectors = ["article", "main", ".main-content", '[role="main"]'];
-  let container = null;
-  for (const sel of mainSelectors) {
-    container = document.querySelector(sel);
-    if (container) break;
+// Update translation content checking for duplicates
+function updateTranslationContent(translationElem, translatedText) {
+  if (
+    !hasDuplicateTranslation(translationElem, translatedText) &&
+    !isNestedDuplicate(translationElem, translatedText)
+  ) {
+    translationElem.textContent = translatedText;
+    return true;
   }
-  if (!container) return [];
-  // Filter paragraphs, ignore nav/aside/toc inside main
-  return Array.from(container.querySelectorAll(TEXT_ELEMENT_SELECTOR)).filter(
-    (p) => {
-      const parentClasses = p.parentElement.className || "";
-      return !/sidebar|nav|toc/i.test(parentClasses) && p.offsetParent;
-    }
-  );
+  return false;
 }
 
+// Helper functions for element selection and validation
 function isCodeElement(element) {
   return (
     element.closest(
@@ -183,58 +172,142 @@ function isNestedDuplicate(p, translationText) {
   return false;
 }
 
-// Translate all existing text elements
-async function translateAll(node) {
+// Element selection
+function getMainArticleParagraphs() {
+  const mainSelectors = ["article", "main", ".main-content", '[role="main"]'];
+  let container = null;
+  for (const sel of mainSelectors) {
+    container = document.querySelector(sel);
+    if (container) break;
+  }
+  if (!container) return [];
+
+  // Filter paragraphs, ignore nav/aside/toc inside main
+  return Array.from(container.querySelectorAll(TEXT_ELEMENT_SELECTOR)).filter(
+    (p) => {
+      const parentClasses = p.parentElement.className || "";
+      return !/sidebar|nav|toc/i.test(parentClasses) && p.offsetParent;
+    }
+  );
+}
+
+// Element validation
+function shouldTranslateElement(element) {
+  const text = element.textContent.trim();
+
+  // Skip elements that are empty, very short, code, or already translated
+  return (
+    text.length >= 10 &&
+    !isCodeElement(element) &&
+    !element.closest(".translated")
+  );
+}
+
+// Process a single element
+async function processElement(element) {
+  if (!isActiveTranslator || !shouldTranslateElement(element)) {
+    return;
+  }
+
+  const originalText = element.textContent.trim();
+
+  // Skip if already translated
+  const alreadyTranslated =
+    element.nextElementSibling &&
+    element.nextElementSibling.classList.contains("translated");
+  if (alreadyTranslated) return;
+
+  // Create and insert the translation element
+  const transElem = createTranslationElement(element);
+  insertTranslationElement(element, transElem);
+
+  // Detect language and translate
+  try {
+    const sourceLanguage = await detectLanguage(originalText);
+
+    // Only translate between English and Vietnamese
+    if (sourceLanguage === "en" || sourceLanguage === "vi") {
+      const targetLanguage = sourceLanguage === "en" ? "vi" : "en";
+
+      // Translate with update callback
+      await translateText(
+        originalText,
+        sourceLanguage,
+        targetLanguage,
+        (translatedText) => updateTranslationContent(transElem, translatedText)
+      );
+    } else {
+      // Remove the translation element if language is not supported
+      // transElem.remove();
+    }
+  } catch (error) {
+    console.error("Error processing element:", error);
+    transElem.textContent = "Translation error";
+  }
+}
+
+// Main processing function
+async function processPageContent() {
   // Get all main article paragraphs
   const articleParagraphs = getMainArticleParagraphs();
 
-  articleParagraphs.forEach(async (element) => {
-    if (!isActiveTranslator) return;
-
-    if (isCodeElement(element)) return;
-
-    // Skip elements that are part of the UI or very small
-    if (
-      element.closest(".translated") ||
-      element.textContent.trim().length < 10
-    )
-      return;
-    await translateElement(element);
-  });
+  for (const element of articleParagraphs) {
+    await processElement(element);
+  }
 }
 
-translateAll(document);
+// Observer for dynamic content
+function setupMutationObserver() {
+  const observer = new MutationObserver(async (mutations) => {
+    if (!isActiveTranslator) return;
 
-const observer = new MutationObserver(async (mutations) => {
-  if (!isActiveTranslator) return;
-  for (const mutation of mutations) {
-    // If new nodes were added
-    for (const node of mutation.addedNodes) {
-      if (node instanceof Element) {
-        // Find and translate all text elements in the added node
-        await translateAll(node);
+    for (const mutation of mutations) {
+      // If new nodes were added
+      for (const node of mutation.addedNodes) {
+        if (node instanceof Element) {
+          // Process all translatable elements in the added node
+          const articleParagraphs = getMainArticleParagraphs();
+          for (const element of articleParagraphs) {
+            await processElement(element);
+          }
+        }
       }
     }
-  }
-});
+  });
 
-// https://developer.chrome.com/ is a SPA (Single Page Application) so can
-// update the address bar and render new content without reloading. Our content
-// script won't be reinjected when this happens, so we need to watch for
-// changes to the content.
-observer.observe(document.body, {
-  attributes: true,
-  childList: true,
-  subtree: true,
-});
+  // Watch for changes to the content
+  observer.observe(document.body, {
+    attributes: true,
+    childList: true,
+    subtree: true,
+  });
 
-chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-  if (request.action === "toggleTranslator") {
-    // Handle enabling/disabling the translator
-    isActiveTranslator = request.enabled;
+  return observer;
+}
 
-    if (isActiveTranslator) {
-      await translateAll(document);
+// Message handling
+function setupMessageListener() {
+  chrome.runtime.onMessage.addListener(
+    async (request, sender, sendResponse) => {
+      if (request.action === "toggleTranslator") {
+        // Handle enabling/disabling the translator
+        isActiveTranslator = request.enabled;
+
+        if (isActiveTranslator) {
+          await processPageContent();
+        }
+      }
     }
-  }
-});
+  );
+}
+
+// Initialize and run
+function initialize() {
+  initializeState();
+  setupMessageListener();
+  setupMutationObserver();
+  processPageContent();
+}
+
+// Start the extension
+initialize();
