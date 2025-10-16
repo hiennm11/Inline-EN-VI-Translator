@@ -172,27 +172,180 @@ function isNestedDuplicate(p: Element, translationText: string): boolean {
   return false;
 }
 
-// Element selection
+/**
+ * Finds the most likely content container using content density analysis
+ * This uses a heuristic approach that looks for areas of the page with:
+ * - High density of text elements
+ * - Good text-to-tag ratio (measure of content vs markup)
+ * - Appropriate nesting level (not too shallow, not too deep)
+ * Similar to how browser reader modes identify main content
+ */
+function findContentByDensity(): Element | null {
+  // Get all potential content containers (exclude obvious non-content areas)
+  const potentialContainers = Array.from(document.querySelectorAll('div, section, main, article'))
+    .filter(el => {
+      const tagName = el.tagName.toLowerCase();
+      const id = (el.id || '').toLowerCase();
+      const className = (el.className || '').toString().toLowerCase();
+      
+      // Filter out obvious non-content containers
+      return !(
+        /sidebar|nav|header|footer|menu|comment|widget|ad/i.test(id + ' ' + className) ||
+        tagName === 'nav' ||
+        tagName === 'header' ||
+        tagName === 'footer'
+      );
+    });
+  
+  if (potentialContainers.length === 0) return null;
+  
+  // Score each container based on content metrics
+  interface ScoredContainer {
+    element: Element;
+    score: number;
+    textLength: number;
+    textDensity: number;
+    paragraphCount: number;
+  }
+  
+  const scoredContainers: ScoredContainer[] = potentialContainers.map(element => {
+    // Get content stats
+    // Text nodes can be useful for more complex analysis if needed in the future
+    // const textNodes = getTextNodesIn(element);
+    const textLength = element.textContent?.length || 0;
+    const paragraphs = element.querySelectorAll(TEXT_ELEMENT_SELECTOR);
+    const paragraphCount = paragraphs.length;
+    
+    // Calculate text density (text length / element count)
+    const descendantCount = element.querySelectorAll('*').length || 1;
+    const textDensity = textLength / descendantCount;
+    
+    // Calculate link ratio (lower is better for content)
+    const linkText = Array.from(element.querySelectorAll('a'))
+      .reduce((total, a) => total + (a.textContent?.length || 0), 0);
+    const linkRatio = textLength > 0 ? linkText / textLength : 1;
+    
+    // Score based on these metrics
+    let score = 0;
+    score += textLength * 0.1; // Reward length
+    score += paragraphCount * 10; // Heavily reward paragraph count
+    score += textDensity * 5; // Reward text density
+    score -= linkRatio * 50; // Penalize high link ratio
+    
+    return {
+      element,
+      score,
+      textLength,
+      textDensity,
+      paragraphCount
+    };
+  })
+  .filter(container => {
+    // Filter out containers with too little content
+    return container.textLength > 200 && container.paragraphCount >= 2;
+  })
+  .sort((a, b) => b.score - a.score);
+  
+  // Return the highest scoring container, or null if none found
+  return scoredContainers.length > 0 ? scoredContainers[0].element : null;
+}
+
+/*
+ * NOTE: This utility function is commented out for now but may be useful for future
+ * enhancements to content detection algorithms.
+ *
+ * Helper function to get all text nodes within an element
+ *
+function getTextNodesIn(element: Element): Node[] {
+  const textNodes: Node[] = [];
+  const walker = document.createTreeWalker(
+    element, 
+    NodeFilter.SHOW_TEXT, 
+    {
+      acceptNode: node => {
+        // Skip empty text nodes
+        return node.textContent?.trim() 
+          ? NodeFilter.FILTER_ACCEPT 
+          : NodeFilter.FILTER_REJECT;
+      }
+    }
+  );
+  
+  let node: Node | null;
+  while (node = walker.nextNode()) {
+    textNodes.push(node);
+  }
+  
+  return textNodes;
+}
+*/
+
+// Element selection with improved content detection
 function getMainArticleParagraphs(): Element[] {
+  // First approach: Try common container selectors
   const mainSelectors = [
     "article",
     "main",
     ".main-content",
     '[role="main"]',
     ".content-base",
+    ".post-content",
+    ".entry-content",
+    "#content",
+    ".content",
+    ".article",
+    ".post",
+    ".story",
   ];
+  
   let container: Element | null = null;
+  
+  // Try each selector in order of likelihood
   for (const sel of mainSelectors) {
-    container = document.querySelector(sel);
-    if (container) break;
+    const elements = document.querySelectorAll(sel);
+    // If multiple elements match, choose the one with the most text content
+    if (elements.length > 0) {
+      if (elements.length === 1) {
+        container = elements[0];
+      } else {
+        // Find the element with the most text content
+        let maxTextLength = 0;
+        elements.forEach(el => {
+          const textLength = el.textContent?.length || 0;
+          if (textLength > maxTextLength) {
+            maxTextLength = textLength;
+            container = el;
+          }
+        });
+      }
+      if (container) break;
+    }
   }
-  if (!container) return [];
+  
+  // Second approach: If no container found, use content density analysis
+  if (!container) {
+    container = findContentByDensity();
+  }
+  
+  // If we still don't have a container, fall back to body
+  if (!container) {
+    console.log("No specific content container found, using document body");
+    container = document.body;
+  }
 
   // Filter paragraphs, ignore nav/aside/toc inside main
   return Array.from(container.querySelectorAll(TEXT_ELEMENT_SELECTOR)).filter(
     (p) => {
       const parentClasses = (p.parentElement?.className || "") as string;
-      return !/sidebar|nav|toc/i.test(parentClasses) && (p as HTMLElement).offsetParent !== null;
+      const elementId = (p.id || "").toLowerCase();
+      const elementClasses = (p.className || "").toString().toLowerCase();
+      
+      // More comprehensive filtering
+      const isHidden = (p as HTMLElement).offsetParent === null;
+      const isInUnwantedSection = /sidebar|nav|toc|footer|header|menu|comment|widget|ad/i.test(parentClasses + " " + elementClasses + " " + elementId);
+      const hasMinimumText = (p.textContent?.trim().length || 0) >= 10;
+      
+      return !isHidden && !isInUnwantedSection && hasMinimumText;
     }
   );
 }
@@ -207,6 +360,58 @@ function shouldTranslateElement(element: Element): boolean {
     !isCodeElement(element) &&
     !element.closest(".translated")
   );
+}
+
+/**
+ * Get all translatable paragraphs from the entire page
+ * Used as fallback when main content detection doesn't find enough content
+ */
+function getAllPageParagraphs(): Element[] {
+  // Get all text elements matching our selector
+  return Array.from(document.querySelectorAll(TEXT_ELEMENT_SELECTOR))
+    .filter(element => {
+      const elementClasses = (element.className || "").toString().toLowerCase();
+      const elementId = (element.id || "").toLowerCase();
+      const parentClasses = (element.parentElement?.className || "").toString().toLowerCase();
+      
+      // Filter out elements that are:
+      const isHidden = (element as HTMLElement).offsetParent === null;
+      const isInSkippedElement = /nav|footer|header|sidebar|menu|comment|widget|ad/i.test(
+        elementClasses + " " + elementId + " " + parentClasses
+      );
+      const isShort = (element.textContent?.trim().length || 0) < 10;
+      const isCodeBlock = isCodeElement(element);
+      const isTranslated = element.closest(".translated") !== null;
+      
+      return !isHidden && !isInSkippedElement && !isShort && !isCodeBlock && !isTranslated;
+    });
+}
+
+/**
+ * Get only currently visible paragraphs in the viewport with some margin
+ * Used for dynamic sites to prioritize what the user is currently seeing
+ */
+function getAllVisibleParagraphs(): Element[] {
+  // Get all filtered paragraphs first
+  const allParagraphs = getAllPageParagraphs();
+  
+  // Get current viewport dimensions with some margin
+  const viewportTop = window.scrollY - 300; // 300px above viewport
+  const viewportBottom = window.scrollY + window.innerHeight + 500; // 500px below viewport
+  
+  // Filter only elements in or near viewport
+  return allParagraphs.filter(element => {
+    const rect = element.getBoundingClientRect();
+    const elementTop = rect.top + window.scrollY;
+    const elementBottom = rect.bottom + window.scrollY;
+    
+    // Check if element is in extended viewport
+    return (
+      (elementTop >= viewportTop && elementTop <= viewportBottom) || 
+      (elementBottom >= viewportTop && elementBottom <= viewportBottom) ||
+      (elementTop <= viewportTop && elementBottom >= viewportBottom)
+    );
+  });
 }
 
 // Process a single element
@@ -280,41 +485,73 @@ async function processPageContent(): Promise<void> {
   }
 }
 
-// Observer for dynamic content - MODIFIED to be more efficient
+// Observer for dynamic content - MODIFIED to be more efficient and adaptive
 function setupMutationObserver(): MutationObserver {
   // Throttle function to prevent too many calls
   let processingTimeout: ReturnType<typeof setTimeout> | null = null;
-  const throttledProcess = () => {
+  let detectedDynamicSite = false;
+  let mutationCounter = 0;
+  
+  const throttledProcess = (_mutations: MutationRecord[]) => {
     if (processingTimeout) clearTimeout(processingTimeout);
+    
+    // Track mutation frequency to detect dynamic sites (SPAs, infinite scroll)
+    mutationCounter++;
+    if (mutationCounter > 10) {
+      detectedDynamicSite = true;
+    }
+    
     processingTimeout = setTimeout(async () => {
       if (!isActiveTranslator) return;
       
-      // Get only new elements that need translation
-      const articleParagraphs = getMainArticleParagraphs().filter(
+      // For highly dynamic sites, check for new content in the viewport first
+      let articleParagraphs: Element[];
+      
+      if (detectedDynamicSite) {
+        // Focus on visible content first for dynamic sites
+        articleParagraphs = getAllVisibleParagraphs();
+      } else {
+        // For normal sites, use the main content detection
+        articleParagraphs = getMainArticleParagraphs();
+      }
+      
+      // Filter to only get new elements that need translation
+      articleParagraphs = articleParagraphs.filter(
         element => !element.nextElementSibling?.classList.contains('translated')
       );
       
+      if (articleParagraphs.length === 0) return;
+      
       // Process in small batches
-      const BATCH_SIZE = 3;
+      const BATCH_SIZE = detectedDynamicSite ? 2 : 3; // Smaller batches for dynamic sites
+      const DELAY = detectedDynamicSite ? 400 : 300;  // Longer delays for dynamic sites
+      
       for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
         const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
         await Promise.all(batch.map(element => processElement(element)));
         
         // Small delay between batches
         if (i + BATCH_SIZE < articleParagraphs.length) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise(resolve => setTimeout(resolve, DELAY));
         }
       }
-    }, 500);
+    }, detectedDynamicSite ? 800 : 500); // Longer throttle for dynamic sites
   };
 
   const observer = new MutationObserver(throttledProcess);
 
-  // Watch for changes to the content
+  // Watch for changes to the content with optimized configuration
   observer.observe(document.body, {
     childList: true,
     subtree: true,
+    characterData: false, // Don't need character data changes
+    attributeFilter: ['class', 'style'], // Only care about visibility changes
   });
+
+  // Reset mutation counter periodically
+  setInterval(() => {
+    mutationCounter = 0;
+  }, 30000);
 
   return observer;
 }
@@ -397,8 +634,14 @@ function setupMessageListener(): void {
 
 // New function to prioritize visible elements
 async function processVisibleElementsFirst(): Promise<void> {
-  // Get all elements
-  const allElements = getMainArticleParagraphs();
+  // Get all elements from main content
+  let allElements = getMainArticleParagraphs();
+  
+  // If very few paragraphs found, try using all body paragraphs as fallback
+  if (allElements.length < 3) {
+    console.log("Few paragraphs found in main content, searching across entire page");
+    allElements = getAllPageParagraphs();
+  }
   
   // Show total count
   showTranslationProgress(0, allElements.length);
