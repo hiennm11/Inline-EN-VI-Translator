@@ -6,8 +6,9 @@ chrome.action.onClicked.addListener(async (tab) => {
   await initState(tab);
 });
 
-async function initState(tab) {
-  chrome.storage.sync.get("translator_on", async ({ translator_on }) => {
+async function initState(tab?: chrome.tabs.Tab): Promise<void> {
+  chrome.storage.sync.get("translator_on", async (result: { translator_on?: boolean }) => {
+    const translator_on = result.translator_on || false;
     const newStatus = !translator_on;
     chrome.storage.sync.set({ translator_on: newStatus });
     chrome.action.setBadgeText({
@@ -29,14 +30,14 @@ async function initState(tab) {
   });
 }
 
-async function initTranslator(sourceLanguage = "en") {
+async function initTranslator(sourceLanguage = "en"): Promise<void> {
   if (!("Translator" in self)) {
     throw new Error("Translator is not supported.");
   }
 
   const targetLanguage = sourceLanguage === "en" ? "vi" : "en";
 
-  const availability = await Translator.availability({
+  const availability = await (self as any).Translator.availability({
     sourceLanguage,
     targetLanguage,
   });
@@ -44,15 +45,14 @@ async function initTranslator(sourceLanguage = "en") {
 
   if (isUnavailable) {
     console.log(`${sourceLanguage} - ${targetLanguage} pair is not supported.`);
-    transElem.textContent = "Translation not available for this language pair.";
     return;
   }
 
-  translator = await Translator.create({
+  await (self as any).Translator.create({
     sourceLanguage,
     targetLanguage,
-    monitor(m) {
-      m.addEventListener("downloadprogress", (e) => {
+    monitor(m: any) {
+      m.addEventListener("downloadprogress", (e: any) => {
         console.log(
           `Downloaded ${sourceLanguage} - ${targetLanguage}: ${e.loaded * 100}%`
         );
