@@ -174,7 +174,13 @@ function isNestedDuplicate(p, translationText) {
 
 // Element selection
 function getMainArticleParagraphs() {
-  const mainSelectors = ["article", "main", ".main-content", '[role="main"]'];
+  const mainSelectors = [
+    "article",
+    "main",
+    ".main-content",
+    '[role="main"]',
+    ".content-base",
+  ];
   let container = null;
   for (const sel of mainSelectors) {
     container = document.querySelector(sel);
@@ -246,38 +252,66 @@ async function processElement(element) {
   }
 }
 
-// Main processing function
+// Main processing function - MODIFIED for batched processing
 async function processPageContent() {
   // Get all main article paragraphs
   const articleParagraphs = getMainArticleParagraphs();
-
-  for (const element of articleParagraphs) {
-    await processElement(element);
+  
+  // Process elements in smaller batches
+  const BATCH_SIZE = 5;
+  const DELAY_BETWEEN_BATCHES = 500; // ms
+  
+  // Create batches
+  for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
+    if (!isActiveTranslator) break; // Stop if disabled mid-processing
+    
+    const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
+    
+    // Process batch
+    await Promise.all(batch.map(element => processElement(element)));
+    
+    // Show progress
+    console.log(`Translated batch ${i/BATCH_SIZE + 1}/${Math.ceil(articleParagraphs.length/BATCH_SIZE)}`);
+    
+    // Wait before processing next batch to prevent overwhelming the browser
+    if (i + BATCH_SIZE < articleParagraphs.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+    }
   }
 }
 
-// Observer for dynamic content
+// Observer for dynamic content - MODIFIED to be more efficient
 function setupMutationObserver() {
-  const observer = new MutationObserver(async (mutations) => {
-    if (!isActiveTranslator) return;
-
-    for (const mutation of mutations) {
-      // If new nodes were added
-      for (const node of mutation.addedNodes) {
-        if (node instanceof Element) {
-          // Process all translatable elements in the added node
-          const articleParagraphs = getMainArticleParagraphs();
-          for (const element of articleParagraphs) {
-            await processElement(element);
-          }
+  // Throttle function to prevent too many calls
+  let processingTimeout = null;
+  const throttledProcess = () => {
+    if (processingTimeout) clearTimeout(processingTimeout);
+    processingTimeout = setTimeout(async () => {
+      if (!isActiveTranslator) return;
+      
+      // Get only new elements that need translation
+      const articleParagraphs = getMainArticleParagraphs().filter(
+        element => !element.nextElementSibling?.classList.contains('translated')
+      );
+      
+      // Process in small batches
+      const BATCH_SIZE = 3;
+      for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
+        const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(element => processElement(element)));
+        
+        // Small delay between batches
+        if (i + BATCH_SIZE < articleParagraphs.length) {
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
-    }
-  });
+    }, 500);
+  };
+
+  const observer = new MutationObserver(throttledProcess);
 
   // Watch for changes to the content
   observer.observe(document.body, {
-    attributes: true,
     childList: true,
     subtree: true,
   });
@@ -285,7 +319,56 @@ function setupMutationObserver() {
   return observer;
 }
 
-// Message handling
+// Add a new function to provide visual feedback
+function showTranslationProgress(current, total) {
+  // Create or update progress indicator
+  let progressElement = document.getElementById('translation-progress');
+  if (!progressElement) {
+    progressElement = document.createElement('div');
+    progressElement.id = 'translation-progress';
+    progressElement.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 105, 92, 0.9);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 4px;
+      z-index: 10000;
+      font-family: system-ui;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.16);
+    `;
+    document.body.appendChild(progressElement);
+  }
+  
+  // Add cancel button
+  progressElement.innerHTML = `
+    Translating: ${current}/${total}
+    <button id="cancel-translation" style="margin-left: 10px; cursor: pointer;">Cancel</button>
+  `;
+  
+  // Add event listener
+  document.getElementById('cancel-translation').addEventListener('click', () => {
+    isActiveTranslator = false;
+    progressElement.textContent = "Translation cancelled";
+    setTimeout(() => {
+      if (progressElement.parentNode) {
+        progressElement.parentNode.removeChild(progressElement);
+      }
+    }, 1500);
+  });
+  
+  // Hide after complete
+  if (current >= total) {
+    setTimeout(() => {
+      if (progressElement.parentNode) {
+        progressElement.parentNode.removeChild(progressElement);
+      }
+    }, 3000);
+  }
+}
+
+// Message handling - MODIFIED to handle large page option
 function setupMessageListener() {
   chrome.runtime.onMessage.addListener(
     async (request, sender, sendResponse) => {
@@ -294,11 +377,120 @@ function setupMessageListener() {
         isActiveTranslator = request.enabled;
 
         if (isActiveTranslator) {
-          await processPageContent();
+          // Add a flag for large pages
+          const isLargePage = document.querySelectorAll(TEXT_ELEMENT_SELECTOR).length > 100;
+          
+          if (isLargePage) {
+            // For large pages, we'll translate visible elements first
+            await processVisibleElementsFirst();
+          } else {
+            // For smaller pages, process normally
+            await processPageContent();
+          }
         }
       }
     }
   );
+}
+
+// New function to prioritize visible elements
+async function processVisibleElementsFirst() {
+  // Get all elements
+  const allElements = getMainArticleParagraphs();
+  
+  // Show total count
+  showTranslationProgress(0, allElements.length);
+  
+  // Split into visible and non-visible elements
+  const visibleElements = [];
+  const nonVisibleElements = [];
+  
+  allElements.forEach(element => {
+    const rect = element.getBoundingClientRect();
+    const isVisible = (
+      rect.top >= 0 &&
+      rect.top <= window.innerHeight * 3 // Include elements a bit below the viewport
+    );
+    
+    if (isVisible) {
+      visibleElements.push(element);
+    } else {
+      nonVisibleElements.push(element);
+    }
+  });
+  
+  // Process visible elements first
+  const BATCH_SIZE = 5;
+  const DELAY = 300;
+  let processedCount = 0;
+  
+  // Process visible elements
+  for (let i = 0; i < visibleElements.length; i += BATCH_SIZE) {
+    if (!isActiveTranslator) break;
+    
+    const batch = visibleElements.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(element => processElement(element)));
+    
+    processedCount += batch.length;
+    showTranslationProgress(processedCount, allElements.length);
+    
+    await new Promise(resolve => setTimeout(resolve, DELAY));
+  }
+  
+  // Process remaining elements with longer delays
+  for (let i = 0; i < nonVisibleElements.length; i += BATCH_SIZE) {
+    if (!isActiveTranslator) break;
+    
+    const batch = nonVisibleElements.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(element => processElement(element)));
+    
+    processedCount += batch.length;
+    showTranslationProgress(processedCount, allElements.length);
+    
+    await new Promise(resolve => setTimeout(resolve, DELAY * 2));
+  }
+}
+
+// Add function for lazy loading translations
+function setupLazyTranslation() {
+  // Create intersection observer
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && isActiveTranslator) {
+        const element = entry.target;
+        // Process this element if it needs translation
+        if (!element.nextElementSibling?.classList.contains('translated')) {
+          processElement(element);
+        }
+        // Unobserve after processing
+        observer.unobserve(element);
+      }
+    });
+  }, { rootMargin: '200px' });
+  
+  // Observe all translatable elements
+  function observeAllElements() {
+    if (!isActiveTranslator) return;
+    
+    const elements = getMainArticleParagraphs();
+    elements.forEach(element => {
+      if (!element.nextElementSibling?.classList.contains('translated')) {
+        observer.observe(element);
+      }
+    });
+  }
+  
+  // Call initially and when scrolling stops
+  observeAllElements();
+  
+  // Add scroll listener with throttling
+  let scrollTimeout;
+  window.addEventListener('scroll', () => {
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(observeAllElements, 500);
+  });
+  
+  return observer;
 }
 
 // Initialize and run
@@ -306,7 +498,11 @@ function initialize() {
   initializeState();
   setupMessageListener();
   setupMutationObserver();
-  processPageContent();
+  setupLazyTranslation();
+  // Only process visible content initially
+  if (isActiveTranslator) {
+    processVisibleElementsFirst();
+  }
 }
 
 // Start the extension
