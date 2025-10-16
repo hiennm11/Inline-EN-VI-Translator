@@ -1,41 +1,41 @@
 // Configuration and globals
 let isActiveTranslator = false;
-const translators = {};
+const translators: Record<string, any> = {};
 
 // Define selector for all text elements we want to translate
 const TEXT_ELEMENT_SELECTOR =
   "p, h1, h2, h3, h4, h5, h6, span, li, td, th, figcaption, blockquote";
 
 // Initialize state from storage
-function initializeState() {
-  chrome.storage.sync.get("translator_on", ({ translator_on }) => {
-    isActiveTranslator = translator_on;
+function initializeState(): void {
+  chrome.storage.sync.get("translator_on", (result: { translator_on?: boolean }) => {
+    isActiveTranslator = result.translator_on || false;
   });
 }
 
 // Language detection
-async function detectLanguage(text) {
+async function detectLanguage(text: string): Promise<string> {
   if (!("LanguageDetector" in self)) {
     throw new Error("LanguageDetector is not supported.");
   }
 
   // Create detector only once
-  if (!window.languageDetector) {
-    window.languageDetector = await LanguageDetector.create();
+  if (!(window as any).languageDetector) {
+    (window as any).languageDetector = await (self as any).LanguageDetector.create();
   }
 
-  const { detectedLanguage, confidence } = (
-    await window.languageDetector.detect(text)
+  const { detectedLanguage } = (
+    await (window as any).languageDetector.detect(text)
   )[0];
   return detectedLanguage;
 }
 
 // Get or create translator instance
-async function getTranslatorInstance(sourceLanguage, targetLanguage) {
+async function getTranslatorInstance(sourceLanguage: string, targetLanguage: string): Promise<any | null> {
   const translatorKey = `${sourceLanguage}-${targetLanguage}`;
 
   // Check availability
-  const availability = await Translator.availability({
+  const availability = await (self as any).Translator.availability({
     sourceLanguage,
     targetLanguage,
   });
@@ -47,7 +47,7 @@ async function getTranslatorInstance(sourceLanguage, targetLanguage) {
 
   // Use existing translator or create a new one
   if (!translators[translatorKey]) {
-    translators[translatorKey] = await Translator.create({
+    translators[translatorKey] = await (self as any).Translator.create({
       sourceLanguage,
       targetLanguage,
     });
@@ -58,11 +58,11 @@ async function getTranslatorInstance(sourceLanguage, targetLanguage) {
 
 // Translation function
 async function translateText(
-  text,
-  sourceLanguage,
-  targetLanguage,
-  updateCallback
-) {
+  text: string,
+  sourceLanguage: string,
+  targetLanguage: string,
+  updateCallback?: (text: string) => void
+): Promise<string> {
   try {
     if (!("Translator" in self)) {
       throw new Error("Translator is not supported.");
@@ -98,7 +98,7 @@ async function translateText(
 }
 
 // DOM manipulation to add translations
-function createTranslationElement(originalElement) {
+function createTranslationElement(originalElement: Element): HTMLElement {
   // Determine the right tag to use
   const tagName = originalElement.tagName === "LI" ? "LI" : "P";
 
@@ -111,7 +111,7 @@ function createTranslationElement(originalElement) {
 }
 
 // Insert translation element into the page
-function insertTranslationElement(originalElement, translationElement) {
+function insertTranslationElement(originalElement: Element, translationElement: Element): void {
   // For list items, append to the list rather than after the element
   if (originalElement.tagName === "LI") {
     const parentList = originalElement.parentElement;
@@ -129,7 +129,7 @@ function insertTranslationElement(originalElement, translationElement) {
 }
 
 // Update translation content checking for duplicates
-function updateTranslationContent(translationElem, translatedText) {
+function updateTranslationContent(translationElem: Element, translatedText: string): boolean {
   if (
     !hasDuplicateTranslation(translationElem, translatedText) &&
     !isNestedDuplicate(translationElem, translatedText)
@@ -141,7 +141,7 @@ function updateTranslationContent(translationElem, translatedText) {
 }
 
 // Helper functions for element selection and validation
-function isCodeElement(element) {
+function isCodeElement(element: Element): boolean {
   return (
     element.closest(
       'pre, code, .highlight, .code-block, [class*="language-"]'
@@ -149,23 +149,23 @@ function isCodeElement(element) {
   );
 }
 
-function hasDuplicateTranslation(p, translationText) {
+function hasDuplicateTranslation(p: Element, translationText: string): boolean {
   // Check next sibling for class and content
   const next = p.nextElementSibling;
   return (
-    next &&
+    next !== null &&
     next.classList.contains("translated") &&
-    next.textContent.trim() === translationText.trim()
+    next.textContent?.trim() === translationText.trim()
   );
 }
 
 // Check for nested duplicate: e.g. <h3>…<span>…<p class="translated"></p>…</span>…</h3>
-function isNestedDuplicate(p, translationText) {
+function isNestedDuplicate(p: Element, translationText: string): boolean {
   // Looks for ancestor containing a matching translated element
-  let ancestor = p.parentElement;
+  let ancestor: Element | null = p.parentElement;
   while (ancestor) {
     const nested = ancestor.querySelector(".translated");
-    if (nested && nested.textContent.trim() === translationText.trim())
+    if (nested && nested.textContent?.trim() === translationText.trim())
       return true;
     ancestor = ancestor.parentElement;
   }
@@ -173,7 +173,7 @@ function isNestedDuplicate(p, translationText) {
 }
 
 // Element selection
-function getMainArticleParagraphs() {
+function getMainArticleParagraphs(): Element[] {
   const mainSelectors = [
     "article",
     "main",
@@ -181,7 +181,7 @@ function getMainArticleParagraphs() {
     '[role="main"]',
     ".content-base",
   ];
-  let container = null;
+  let container: Element | null = null;
   for (const sel of mainSelectors) {
     container = document.querySelector(sel);
     if (container) break;
@@ -191,15 +191,15 @@ function getMainArticleParagraphs() {
   // Filter paragraphs, ignore nav/aside/toc inside main
   return Array.from(container.querySelectorAll(TEXT_ELEMENT_SELECTOR)).filter(
     (p) => {
-      const parentClasses = p.parentElement.className || "";
-      return !/sidebar|nav|toc/i.test(parentClasses) && p.offsetParent;
+      const parentClasses = (p.parentElement?.className || "") as string;
+      return !/sidebar|nav|toc/i.test(parentClasses) && (p as HTMLElement).offsetParent !== null;
     }
   );
 }
 
 // Element validation
-function shouldTranslateElement(element) {
-  const text = element.textContent.trim();
+function shouldTranslateElement(element: Element): boolean {
+  const text = element.textContent?.trim() || "";
 
   // Skip elements that are empty, very short, code, or already translated
   return (
@@ -210,12 +210,12 @@ function shouldTranslateElement(element) {
 }
 
 // Process a single element
-async function processElement(element) {
+async function processElement(element: Element): Promise<void> {
   if (!isActiveTranslator || !shouldTranslateElement(element)) {
     return;
   }
 
-  const originalText = element.textContent.trim();
+  const originalText = element.textContent?.trim() || "";
 
   // Skip if already translated
   const alreadyTranslated =
@@ -253,7 +253,7 @@ async function processElement(element) {
 }
 
 // Main processing function - MODIFIED for batched processing
-async function processPageContent() {
+async function processPageContent(): Promise<void> {
   // Get all main article paragraphs
   const articleParagraphs = getMainArticleParagraphs();
   
@@ -281,9 +281,9 @@ async function processPageContent() {
 }
 
 // Observer for dynamic content - MODIFIED to be more efficient
-function setupMutationObserver() {
+function setupMutationObserver(): MutationObserver {
   // Throttle function to prevent too many calls
-  let processingTimeout = null;
+  let processingTimeout: ReturnType<typeof setTimeout> | null = null;
   const throttledProcess = () => {
     if (processingTimeout) clearTimeout(processingTimeout);
     processingTimeout = setTimeout(async () => {
@@ -320,7 +320,7 @@ function setupMutationObserver() {
 }
 
 // Add a new function to provide visual feedback
-function showTranslationProgress(current, total) {
+function showTranslationProgress(current: number, total: number): void {
   // Create or update progress indicator
   let progressElement = document.getElementById('translation-progress');
   if (!progressElement) {
@@ -348,20 +348,22 @@ function showTranslationProgress(current, total) {
   `;
   
   // Add event listener
-  document.getElementById('cancel-translation').addEventListener('click', () => {
+  document.getElementById('cancel-translation')?.addEventListener('click', () => {
     isActiveTranslator = false;
-    progressElement.textContent = "Translation cancelled";
-    setTimeout(() => {
-      if (progressElement.parentNode) {
-        progressElement.parentNode.removeChild(progressElement);
-      }
-    }, 1500);
+    if (progressElement) {
+      progressElement.textContent = "Translation cancelled";
+      setTimeout(() => {
+        if (progressElement && progressElement.parentNode) {
+          progressElement.parentNode.removeChild(progressElement);
+        }
+      }, 1500);
+    }
   });
   
   // Hide after complete
   if (current >= total) {
     setTimeout(() => {
-      if (progressElement.parentNode) {
+      if (progressElement && progressElement.parentNode) {
         progressElement.parentNode.removeChild(progressElement);
       }
     }, 3000);
@@ -369,9 +371,9 @@ function showTranslationProgress(current, total) {
 }
 
 // Message handling - MODIFIED to handle large page option
-function setupMessageListener() {
+function setupMessageListener(): void {
   chrome.runtime.onMessage.addListener(
-    async (request, sender, sendResponse) => {
+    async (request: { action: string, enabled: boolean }, _sender: chrome.runtime.MessageSender, _sendResponse: (response?: any) => void) => {
       if (request.action === "toggleTranslator") {
         // Handle enabling/disabling the translator
         isActiveTranslator = request.enabled;
@@ -394,7 +396,7 @@ function setupMessageListener() {
 }
 
 // New function to prioritize visible elements
-async function processVisibleElementsFirst() {
+async function processVisibleElementsFirst(): Promise<void> {
   // Get all elements
   const allElements = getMainArticleParagraphs();
   
@@ -402,8 +404,8 @@ async function processVisibleElementsFirst() {
   showTranslationProgress(0, allElements.length);
   
   // Split into visible and non-visible elements
-  const visibleElements = [];
-  const nonVisibleElements = [];
+  const visibleElements: Element[] = [];
+  const nonVisibleElements: Element[] = [];
   
   allElements.forEach(element => {
     const rect = element.getBoundingClientRect();
@@ -452,7 +454,7 @@ async function processVisibleElementsFirst() {
 }
 
 // Add function for lazy loading translations
-function setupLazyTranslation() {
+function setupLazyTranslation(): IntersectionObserver {
   // Create intersection observer
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -469,7 +471,7 @@ function setupLazyTranslation() {
   }, { rootMargin: '200px' });
   
   // Observe all translatable elements
-  function observeAllElements() {
+  function observeAllElements(): void {
     if (!isActiveTranslator) return;
     
     const elements = getMainArticleParagraphs();
@@ -484,7 +486,7 @@ function setupLazyTranslation() {
   observeAllElements();
   
   // Add scroll listener with throttling
-  let scrollTimeout;
+  let scrollTimeout: ReturnType<typeof setTimeout>;
   window.addEventListener('scroll', () => {
     if (scrollTimeout) clearTimeout(scrollTimeout);
     scrollTimeout = setTimeout(observeAllElements, 500);
@@ -494,7 +496,7 @@ function setupLazyTranslation() {
 }
 
 // Initialize and run
-function initialize() {
+function initialize(): void {
   initializeState();
   setupMessageListener();
   setupMutationObserver();
