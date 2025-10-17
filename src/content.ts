@@ -6,12 +6,7 @@ const translators: Record<string, any> = {};
 const TEXT_ELEMENT_SELECTOR =
   "p, h1, h2, h3, h4, h5, h6, span, li, td, th, figcaption, blockquote";
 
-// Initialize state from storage
-function initializeState(): void {
-  chrome.storage.sync.get("translator_on", (result: { translator_on?: boolean }) => {
-    isActiveTranslator = result.translator_on || false;
-  });
-}
+// State is now initialized directly in the initialize function
 
 // Language detection
 async function detectLanguage(text: string): Promise<string> {
@@ -21,7 +16,9 @@ async function detectLanguage(text: string): Promise<string> {
 
   // Create detector only once
   if (!(window as any).languageDetector) {
-    (window as any).languageDetector = await (self as any).LanguageDetector.create();
+    (window as any).languageDetector = await (
+      self as any
+    ).LanguageDetector.create();
   }
 
   const { detectedLanguage } = (
@@ -31,7 +28,10 @@ async function detectLanguage(text: string): Promise<string> {
 }
 
 // Get or create translator instance
-async function getTranslatorInstance(sourceLanguage: string, targetLanguage: string): Promise<any | null> {
+async function getTranslatorInstance(
+  sourceLanguage: string,
+  targetLanguage: string
+): Promise<any | null> {
   const translatorKey = `${sourceLanguage}-${targetLanguage}`;
 
   // Check availability
@@ -111,7 +111,10 @@ function createTranslationElement(originalElement: Element): HTMLElement {
 }
 
 // Insert translation element into the page
-function insertTranslationElement(originalElement: Element, translationElement: Element): void {
+function insertTranslationElement(
+  originalElement: Element,
+  translationElement: Element
+): void {
   // For list items, append to the list rather than after the element
   if (originalElement.tagName === "LI") {
     const parentList = originalElement.parentElement;
@@ -129,7 +132,10 @@ function insertTranslationElement(originalElement: Element, translationElement: 
 }
 
 // Update translation content checking for duplicates
-function updateTranslationContent(translationElem: Element, translatedText: string): boolean {
+function updateTranslationContent(
+  translationElem: Element,
+  translatedText: string
+): boolean {
   if (
     !hasDuplicateTranslation(translationElem, translatedText) &&
     !isNestedDuplicate(translationElem, translatedText)
@@ -182,23 +188,26 @@ function isNestedDuplicate(p: Element, translationText: string): boolean {
  */
 function findContentByDensity(): Element | null {
   // Get all potential content containers (exclude obvious non-content areas)
-  const potentialContainers = Array.from(document.querySelectorAll('div, section, main, article'))
-    .filter(el => {
-      const tagName = el.tagName.toLowerCase();
-      const id = (el.id || '').toLowerCase();
-      const className = (el.className || '').toString().toLowerCase();
-      
-      // Filter out obvious non-content containers
-      return !(
-        /sidebar|nav|header|footer|menu|comment|widget|ad/i.test(id + ' ' + className) ||
-        tagName === 'nav' ||
-        tagName === 'header' ||
-        tagName === 'footer'
-      );
-    });
-  
+  const potentialContainers = Array.from(
+    document.querySelectorAll("div, section, main, article")
+  ).filter((el) => {
+    const tagName = el.tagName.toLowerCase();
+    const id = (el.id || "").toLowerCase();
+    const className = (el.className || "").toString().toLowerCase();
+
+    // Filter out obvious non-content containers
+    return !(
+      /sidebar|nav|header|footer|menu|comment|widget|ad/i.test(
+        id + " " + className
+      ) ||
+      tagName === "nav" ||
+      tagName === "header" ||
+      tagName === "footer"
+    );
+  });
+
   if (potentialContainers.length === 0) return null;
-  
+
   // Score each container based on content metrics
   interface ScoredContainer {
     element: Element;
@@ -207,45 +216,48 @@ function findContentByDensity(): Element | null {
     textDensity: number;
     paragraphCount: number;
   }
-  
-  const scoredContainers: ScoredContainer[] = potentialContainers.map(element => {
-    // Get content stats
-    // Text nodes can be useful for more complex analysis if needed in the future
-    // const textNodes = getTextNodesIn(element);
-    const textLength = element.textContent?.length || 0;
-    const paragraphs = element.querySelectorAll(TEXT_ELEMENT_SELECTOR);
-    const paragraphCount = paragraphs.length;
-    
-    // Calculate text density (text length / element count)
-    const descendantCount = element.querySelectorAll('*').length || 1;
-    const textDensity = textLength / descendantCount;
-    
-    // Calculate link ratio (lower is better for content)
-    const linkText = Array.from(element.querySelectorAll('a'))
-      .reduce((total, a) => total + (a.textContent?.length || 0), 0);
-    const linkRatio = textLength > 0 ? linkText / textLength : 1;
-    
-    // Score based on these metrics
-    let score = 0;
-    score += textLength * 0.1; // Reward length
-    score += paragraphCount * 10; // Heavily reward paragraph count
-    score += textDensity * 5; // Reward text density
-    score -= linkRatio * 50; // Penalize high link ratio
-    
-    return {
-      element,
-      score,
-      textLength,
-      textDensity,
-      paragraphCount
-    };
-  })
-  .filter(container => {
-    // Filter out containers with too little content
-    return container.textLength > 200 && container.paragraphCount >= 2;
-  })
-  .sort((a, b) => b.score - a.score);
-  
+
+  const scoredContainers: ScoredContainer[] = potentialContainers
+    .map((element) => {
+      // Get content stats
+      // Text nodes can be useful for more complex analysis if needed in the future
+      // const textNodes = getTextNodesIn(element);
+      const textLength = element.textContent?.length || 0;
+      const paragraphs = element.querySelectorAll(TEXT_ELEMENT_SELECTOR);
+      const paragraphCount = paragraphs.length;
+
+      // Calculate text density (text length / element count)
+      const descendantCount = element.querySelectorAll("*").length || 1;
+      const textDensity = textLength / descendantCount;
+
+      // Calculate link ratio (lower is better for content)
+      const linkText = Array.from(element.querySelectorAll("a")).reduce(
+        (total, a) => total + (a.textContent?.length || 0),
+        0
+      );
+      const linkRatio = textLength > 0 ? linkText / textLength : 1;
+
+      // Score based on these metrics
+      let score = 0;
+      score += textLength * 0.1; // Reward length
+      score += paragraphCount * 10; // Heavily reward paragraph count
+      score += textDensity * 5; // Reward text density
+      score -= linkRatio * 50; // Penalize high link ratio
+
+      return {
+        element,
+        score,
+        textLength,
+        textDensity,
+        paragraphCount,
+      };
+    })
+    .filter((container) => {
+      // Filter out containers with too little content
+      return container.textLength > 200 && container.paragraphCount >= 2;
+    })
+    .sort((a, b) => b.score - a.score);
+
   // Return the highest scoring container, or null if none found
   return scoredContainers.length > 0 ? scoredContainers[0].element : null;
 }
@@ -297,9 +309,9 @@ function getMainArticleParagraphs(): Element[] {
     ".post",
     ".story",
   ];
-  
+
   let container: Element | null = null;
-  
+
   // Try each selector in order of likelihood
   for (const sel of mainSelectors) {
     const elements = document.querySelectorAll(sel);
@@ -310,7 +322,7 @@ function getMainArticleParagraphs(): Element[] {
       } else {
         // Find the element with the most text content
         let maxTextLength = 0;
-        elements.forEach(el => {
+        elements.forEach((el) => {
           const textLength = el.textContent?.length || 0;
           if (textLength > maxTextLength) {
             maxTextLength = textLength;
@@ -321,12 +333,12 @@ function getMainArticleParagraphs(): Element[] {
       if (container) break;
     }
   }
-  
+
   // Second approach: If no container found, use content density analysis
   if (!container) {
     container = findContentByDensity();
   }
-  
+
   // If we still don't have a container, fall back to body
   if (!container) {
     console.log("No specific content container found, using document body");
@@ -339,12 +351,15 @@ function getMainArticleParagraphs(): Element[] {
       const parentClasses = (p.parentElement?.className || "") as string;
       const elementId = (p.id || "").toLowerCase();
       const elementClasses = (p.className || "").toString().toLowerCase();
-      
+
       // More comprehensive filtering
       const isHidden = (p as HTMLElement).offsetParent === null;
-      const isInUnwantedSection = /sidebar|nav|toc|footer|header|menu|comment|widget|ad/i.test(parentClasses + " " + elementClasses + " " + elementId);
+      const isInUnwantedSection =
+        /sidebar|nav|toc|footer|header|menu|comment|widget|ad/i.test(
+          parentClasses + " " + elementClasses + " " + elementId
+        );
       const hasMinimumText = (p.textContent?.trim().length || 0) >= 10;
-      
+
       return !isHidden && !isInUnwantedSection && hasMinimumText;
     }
   );
@@ -368,23 +383,33 @@ function shouldTranslateElement(element: Element): boolean {
  */
 function getAllPageParagraphs(): Element[] {
   // Get all text elements matching our selector
-  return Array.from(document.querySelectorAll(TEXT_ELEMENT_SELECTOR))
-    .filter(element => {
+  return Array.from(document.querySelectorAll(TEXT_ELEMENT_SELECTOR)).filter(
+    (element) => {
       const elementClasses = (element.className || "").toString().toLowerCase();
       const elementId = (element.id || "").toLowerCase();
-      const parentClasses = (element.parentElement?.className || "").toString().toLowerCase();
-      
+      const parentClasses = (element.parentElement?.className || "")
+        .toString()
+        .toLowerCase();
+
       // Filter out elements that are:
       const isHidden = (element as HTMLElement).offsetParent === null;
-      const isInSkippedElement = /nav|footer|header|sidebar|menu|comment|widget|ad/i.test(
-        elementClasses + " " + elementId + " " + parentClasses
-      );
+      const isInSkippedElement =
+        /nav|footer|header|sidebar|menu|comment|widget|ad/i.test(
+          elementClasses + " " + elementId + " " + parentClasses
+        );
       const isShort = (element.textContent?.trim().length || 0) < 10;
       const isCodeBlock = isCodeElement(element);
       const isTranslated = element.closest(".translated") !== null;
-      
-      return !isHidden && !isInSkippedElement && !isShort && !isCodeBlock && !isTranslated;
-    });
+
+      return (
+        !isHidden &&
+        !isInSkippedElement &&
+        !isShort &&
+        !isCodeBlock &&
+        !isTranslated
+      );
+    }
+  );
 }
 
 /**
@@ -394,20 +419,20 @@ function getAllPageParagraphs(): Element[] {
 function getAllVisibleParagraphs(): Element[] {
   // Get all filtered paragraphs first
   const allParagraphs = getAllPageParagraphs();
-  
+
   // Get current viewport dimensions with some margin
   const viewportTop = window.scrollY - 300; // 300px above viewport
   const viewportBottom = window.scrollY + window.innerHeight + 500; // 500px below viewport
-  
+
   // Filter only elements in or near viewport
-  return allParagraphs.filter(element => {
+  return allParagraphs.filter((element) => {
     const rect = element.getBoundingClientRect();
     const elementTop = rect.top + window.scrollY;
     const elementBottom = rect.bottom + window.scrollY;
-    
+
     // Check if element is in extended viewport
     return (
-      (elementTop >= viewportTop && elementTop <= viewportBottom) || 
+      (elementTop >= viewportTop && elementTop <= viewportBottom) ||
       (elementBottom >= viewportTop && elementBottom <= viewportBottom) ||
       (elementTop <= viewportTop && elementBottom >= viewportBottom)
     );
@@ -459,28 +484,43 @@ async function processElement(element: Element): Promise<void> {
 
 // Main processing function - MODIFIED for batched processing
 async function processPageContent(): Promise<void> {
+  // Reset global translation progress before starting
+  resetTranslationProgress();
+
   // Get all main article paragraphs
   const articleParagraphs = getMainArticleParagraphs();
-  
+
+  // Initialize the progress indicator with the total count
+  showTranslationProgress(0, articleParagraphs.length);
+
   // Process elements in smaller batches
   const BATCH_SIZE = 5;
   const DELAY_BETWEEN_BATCHES = 500; // ms
-  
+
   // Create batches
   for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
     if (!isActiveTranslator) break; // Stop if disabled mid-processing
-    
+
     const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
-    
+
     // Process batch
-    await Promise.all(batch.map(element => processElement(element)));
-    
-    // Show progress
-    console.log(`Translated batch ${i/BATCH_SIZE + 1}/${Math.ceil(articleParagraphs.length/BATCH_SIZE)}`);
-    
+    await Promise.all(batch.map((element) => processElement(element)));
+
+    // Update progress with this batch's count
+    showTranslationProgress(batch.length, 0);
+
+    // Show progress in console
+    console.log(
+      `Translated batch ${i / BATCH_SIZE + 1}/${Math.ceil(
+        articleParagraphs.length / BATCH_SIZE
+      )}`
+    );
+
     // Wait before processing next batch to prevent overwhelming the browser
     if (i + BATCH_SIZE < articleParagraphs.length) {
-      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+      await new Promise((resolve) =>
+        setTimeout(resolve, DELAY_BETWEEN_BATCHES)
+      );
     }
   }
 }
@@ -491,51 +531,120 @@ function setupMutationObserver(): MutationObserver {
   let processingTimeout: ReturnType<typeof setTimeout> | null = null;
   let detectedDynamicSite = false;
   let mutationCounter = 0;
-  
-  const throttledProcess = (_mutations: MutationRecord[]) => {
+  let significantChangesDetected = false;
+  let newElementsCount = 0;
+
+  const throttledProcess = (mutations: MutationRecord[]) => {
     if (processingTimeout) clearTimeout(processingTimeout);
-    
+
     // Track mutation frequency to detect dynamic sites (SPAs, infinite scroll)
     mutationCounter++;
-    if (mutationCounter > 10) {
-      detectedDynamicSite = true;
-    }
-    
-    processingTimeout = setTimeout(async () => {
-      if (!isActiveTranslator) return;
-      
-      // For highly dynamic sites, check for new content in the viewport first
-      let articleParagraphs: Element[];
-      
-      if (detectedDynamicSite) {
-        // Focus on visible content first for dynamic sites
-        articleParagraphs = getAllVisibleParagraphs();
-      } else {
-        // For normal sites, use the main content detection
-        articleParagraphs = getMainArticleParagraphs();
-      }
-      
-      // Filter to only get new elements that need translation
-      articleParagraphs = articleParagraphs.filter(
-        element => !element.nextElementSibling?.classList.contains('translated')
-      );
-      
-      if (articleParagraphs.length === 0) return;
-      
-      // Process in small batches
-      const BATCH_SIZE = detectedDynamicSite ? 2 : 3; // Smaller batches for dynamic sites
-      const DELAY = detectedDynamicSite ? 400 : 300;  // Longer delays for dynamic sites
-      
-      for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
-        const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
-        await Promise.all(batch.map(element => processElement(element)));
-        
-        // Small delay between batches
-        if (i + BATCH_SIZE < articleParagraphs.length) {
-          await new Promise(resolve => setTimeout(resolve, DELAY));
+
+    // Check if these mutations represent significant DOM changes
+    // that might indicate new content being loaded
+    let hasSignificantChanges = false;
+
+    for (const mutation of mutations) {
+      // Count added nodes that could contain content
+      if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
+        for (const node of mutation.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            node.nodeType === Node.ELEMENT_NODE &&
+            node.matches("div, section, article, p, h1, h2, h3, h4, h5, h6")
+          ) {
+            hasSignificantChanges = true;
+            newElementsCount++;
+            break;
+          }
         }
       }
-    }, detectedDynamicSite ? 800 : 500); // Longer throttle for dynamic sites
+
+      if (hasSignificantChanges) break;
+    }
+
+    if (mutationCounter > 10 || newElementsCount > 5) {
+      detectedDynamicSite = true;
+    }
+
+    if (hasSignificantChanges) {
+      significantChangesDetected = true;
+    }
+
+    processingTimeout = setTimeout(
+      async () => {
+        if (!isActiveTranslator) return;
+
+        // For highly dynamic sites, check for new content in the viewport first
+        let articleParagraphs: Element[];
+
+        if (detectedDynamicSite) {
+          // Focus on visible content first for dynamic sites
+          articleParagraphs = getAllVisibleParagraphs();
+        } else {
+          // For normal sites, use the main content detection
+          articleParagraphs = getMainArticleParagraphs();
+        }
+
+        // Filter to only get new elements that need translation
+        articleParagraphs = articleParagraphs.filter(
+          (element) =>
+            !element.nextElementSibling?.classList.contains("translated")
+        );
+
+        if (articleParagraphs.length === 0) return;
+
+        // Show progress indicator if we have significant new content
+        // and it's not just a few elements
+        if (
+          (significantChangesDetected && articleParagraphs.length > 3) ||
+          articleParagraphs.length > 8
+        ) {
+          console.log(
+            `Significant content changes detected, ${articleParagraphs.length} new paragraphs found`
+          );
+
+          // Initialize progress tracking with the new content
+          if (!globalTranslationProgress.isActive) {
+            // If no active translation, start fresh
+            resetTranslationProgress();
+            showTranslationProgress(0, articleParagraphs.length);
+          } else {
+            // If translation is already in progress, add to the existing count
+            // Make sure to pass articleParagraphs.length as the second parameter (total)
+            showTranslationProgress(0, articleParagraphs.length);
+          }
+
+          // Reset flags
+          significantChangesDetected = false;
+          newElementsCount = 0;
+        }
+
+        // Process in small batches
+        const BATCH_SIZE = detectedDynamicSite ? 2 : 3; // Smaller batches for dynamic sites
+        const DELAY = detectedDynamicSite ? 400 : 300; // Longer delays for dynamic sites
+
+        for (let i = 0; i < articleParagraphs.length; i += BATCH_SIZE) {
+          if (!isActiveTranslator) break; // Stop if disabled mid-processing
+
+          const batch = articleParagraphs.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map((element) => processElement(element)));
+
+          // Update progress with batch count if we're tracking progress
+          if (globalTranslationProgress.isActive) {
+            // We need to send both the batch size (current) and the total remaining
+            // to ensure the progress display is accurate
+            showTranslationProgress(batch.length, 0);
+          }
+
+          // Small delay between batches
+          if (i + BATCH_SIZE < articleParagraphs.length) {
+            await new Promise((resolve) => setTimeout(resolve, DELAY));
+          }
+        }
+      },
+      detectedDynamicSite ? 800 : 500
+    ); // Longer throttle for dynamic sites
   };
 
   const observer = new MutationObserver(throttledProcess);
@@ -545,24 +654,55 @@ function setupMutationObserver(): MutationObserver {
     childList: true,
     subtree: true,
     characterData: false, // Don't need character data changes
-    attributeFilter: ['class', 'style'], // Only care about visibility changes
+    attributeFilter: ["class", "style"], // Only care about visibility changes
   });
 
   // Reset mutation counter periodically
   setInterval(() => {
     mutationCounter = 0;
+    newElementsCount = 0;
   }, 30000);
 
   return observer;
 }
 
-// Add a new function to provide visual feedback
+// Global translation progress tracking
+let globalTranslationProgress = {
+  current: 0,
+  total: 0,
+  isActive: false,
+  timeoutId: null as ReturnType<typeof setTimeout> | null,
+};
+
+// Add a new function to provide visual feedback with consolidated progress
 function showTranslationProgress(current: number, total: number): void {
-  // Create or update progress indicator
-  let progressElement = document.getElementById('translation-progress');
+  // Update global progress counters
+  if (!globalTranslationProgress.isActive) {
+    // If this is a new translation session, reset counters
+    globalTranslationProgress.current = current;
+    globalTranslationProgress.total = total;
+    globalTranslationProgress.isActive = true;
+  } else {
+    // For existing session, add to the current count
+    globalTranslationProgress.current += current;
+
+    // Always add new elements to the total
+    if (total > 0) {
+      globalTranslationProgress.total += total;
+    }
+
+    // Ensure total is never less than current
+    if (globalTranslationProgress.total < globalTranslationProgress.current) {
+      globalTranslationProgress.total = globalTranslationProgress.current;
+    }
+  }
+
+  // Create or update progress indicator - ensure there's only one
+  let progressElement = document.getElementById("translation-progress");
   if (!progressElement) {
-    progressElement = document.createElement('div');
-    progressElement.id = 'translation-progress';
+    // Create new element if it doesn't exist
+    progressElement = document.createElement("div");
+    progressElement.id = "translation-progress";
     progressElement.style.cssText = `
       position: fixed;
       bottom: 20px;
@@ -577,48 +717,92 @@ function showTranslationProgress(current: number, total: number): void {
     `;
     document.body.appendChild(progressElement);
   }
-  
-  // Add cancel button
+
+  // Update the content
   progressElement.innerHTML = `
-    Translating: ${current}/${total}
+    Translating: ${globalTranslationProgress.current}/${globalTranslationProgress.total}
     <button id="cancel-translation" style="margin-left: 10px; cursor: pointer;">Cancel</button>
   `;
-  
-  // Add event listener
-  document.getElementById('cancel-translation')?.addEventListener('click', () => {
-    isActiveTranslator = false;
-    if (progressElement) {
-      progressElement.textContent = "Translation cancelled";
-      setTimeout(() => {
-        if (progressElement && progressElement.parentNode) {
-          progressElement.parentNode.removeChild(progressElement);
-        }
-      }, 1500);
+
+  // Debug log to help diagnose issues
+  console.log(
+    `Progress updated: ${globalTranslationProgress.current}/${globalTranslationProgress.total}`
+  );
+
+  // Add event listener (using event delegation to avoid multiple listeners)
+  const cancelButton = document.getElementById("cancel-translation");
+  if (cancelButton) {
+    // Remove existing listeners to avoid duplication
+    const newCancelButton = cancelButton.cloneNode(true);
+    if (cancelButton.parentNode) {
+      cancelButton.parentNode.replaceChild(newCancelButton, cancelButton);
     }
-  });
-  
-  // Hide after complete
-  if (current >= total) {
-    setTimeout(() => {
+
+    newCancelButton.addEventListener("click", () => {
+      isActiveTranslator = false;
+      if (progressElement) {
+        progressElement.textContent = "Translation cancelled";
+
+        // Clear any existing timeout
+        if (globalTranslationProgress.timeoutId) {
+          clearTimeout(globalTranslationProgress.timeoutId);
+        }
+
+        globalTranslationProgress.timeoutId = setTimeout(() => {
+          if (progressElement && progressElement.parentNode) {
+            progressElement.parentNode.removeChild(progressElement);
+          }
+          // Reset global progress tracker
+          resetTranslationProgress();
+        }, 1500);
+      }
+    });
+  }
+
+  // Hide after complete and reset
+  if (globalTranslationProgress.current >= globalTranslationProgress.total) {
+    // Clear any existing timeout
+    if (globalTranslationProgress.timeoutId) {
+      clearTimeout(globalTranslationProgress.timeoutId);
+    }
+
+    globalTranslationProgress.timeoutId = setTimeout(() => {
       if (progressElement && progressElement.parentNode) {
         progressElement.parentNode.removeChild(progressElement);
       }
+      // Reset global progress tracker
+      resetTranslationProgress();
     }, 3000);
   }
+}
+
+// Helper function to reset progress tracking
+function resetTranslationProgress(): void {
+  globalTranslationProgress = {
+    current: 0,
+    total: 0,
+    isActive: false,
+    timeoutId: null,
+  };
 }
 
 // Message handling - MODIFIED to handle large page option
 function setupMessageListener(): void {
   chrome.runtime.onMessage.addListener(
-    async (request: { action: string, enabled: boolean }, _sender: chrome.runtime.MessageSender, _sendResponse: (response?: any) => void) => {
+    async (
+      request: { action: string; enabled: boolean },
+      _sender: chrome.runtime.MessageSender,
+      _sendResponse: (response?: any) => void
+    ) => {
       if (request.action === "toggleTranslator") {
         // Handle enabling/disabling the translator
         isActiveTranslator = request.enabled;
 
         if (isActiveTranslator) {
           // Add a flag for large pages
-          const isLargePage = document.querySelectorAll(TEXT_ELEMENT_SELECTOR).length > 100;
-          
+          const isLargePage =
+            document.querySelectorAll(TEXT_ELEMENT_SELECTOR).length > 100;
+
           if (isLargePage) {
             // For large pages, we'll translate visible elements first
             await processVisibleElementsFirst();
@@ -634,120 +818,195 @@ function setupMessageListener(): void {
 
 // New function to prioritize visible elements
 async function processVisibleElementsFirst(): Promise<void> {
+  // Reset global translation progress before starting
+  resetTranslationProgress();
+
   // Get all elements from main content
   let allElements = getMainArticleParagraphs();
-  
+
   // If very few paragraphs found, try using all body paragraphs as fallback
   if (allElements.length < 3) {
-    console.log("Few paragraphs found in main content, searching across entire page");
+    console.log(
+      "Few paragraphs found in main content, searching across entire page"
+    );
     allElements = getAllPageParagraphs();
   }
-  
-  // Show total count
+
+  // Initialize the progress indicator with the total count
   showTranslationProgress(0, allElements.length);
-  
+
   // Split into visible and non-visible elements
   const visibleElements: Element[] = [];
   const nonVisibleElements: Element[] = [];
-  
-  allElements.forEach(element => {
+
+  allElements.forEach((element) => {
     const rect = element.getBoundingClientRect();
-    const isVisible = (
-      rect.top >= 0 &&
-      rect.top <= window.innerHeight * 3 // Include elements a bit below the viewport
-    );
-    
+    const isVisible = rect.top >= 0 && rect.top <= window.innerHeight * 3; // Include elements a bit below the viewport
+
     if (isVisible) {
       visibleElements.push(element);
     } else {
       nonVisibleElements.push(element);
     }
   });
-  
+
   // Process visible elements first
   const BATCH_SIZE = 5;
   const DELAY = 300;
-  let processedCount = 0;
-  
+
   // Process visible elements
   for (let i = 0; i < visibleElements.length; i += BATCH_SIZE) {
     if (!isActiveTranslator) break;
-    
+
     const batch = visibleElements.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(element => processElement(element)));
-    
-    processedCount += batch.length;
-    showTranslationProgress(processedCount, allElements.length);
-    
-    await new Promise(resolve => setTimeout(resolve, DELAY));
+    await Promise.all(batch.map((element) => processElement(element)));
+
+    // Update progress with this batch's count
+    showTranslationProgress(batch.length, 0);
+
+    await new Promise((resolve) => setTimeout(resolve, DELAY));
   }
-  
+
   // Process remaining elements with longer delays
   for (let i = 0; i < nonVisibleElements.length; i += BATCH_SIZE) {
     if (!isActiveTranslator) break;
-    
+
     const batch = nonVisibleElements.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(element => processElement(element)));
-    
-    processedCount += batch.length;
-    showTranslationProgress(processedCount, allElements.length);
-    
-    await new Promise(resolve => setTimeout(resolve, DELAY * 2));
+    await Promise.all(batch.map((element) => processElement(element)));
+
+    // Update progress with this batch's count
+    showTranslationProgress(batch.length, 0);
+
+    await new Promise((resolve) => setTimeout(resolve, DELAY * 2));
   }
 }
 
 // Add function for lazy loading translations
 function setupLazyTranslation(): IntersectionObserver {
   // Create intersection observer
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting && isActiveTranslator) {
-        const element = entry.target;
-        // Process this element if it needs translation
-        if (!element.nextElementSibling?.classList.contains('translated')) {
-          processElement(element);
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting && isActiveTranslator) {
+          const element = entry.target;
+          // Process this element if it needs translation
+          if (!element.nextElementSibling?.classList.contains("translated")) {
+            processElement(element);
+          }
+          // Unobserve after processing
+          observer.unobserve(element);
         }
-        // Unobserve after processing
-        observer.unobserve(element);
-      }
-    });
-  }, { rootMargin: '200px' });
-  
+      });
+    },
+    { rootMargin: "200px" }
+  );
+
   // Observe all translatable elements
   function observeAllElements(): void {
     if (!isActiveTranslator) return;
-    
+
     const elements = getMainArticleParagraphs();
-    elements.forEach(element => {
-      if (!element.nextElementSibling?.classList.contains('translated')) {
+    elements.forEach((element) => {
+      if (!element.nextElementSibling?.classList.contains("translated")) {
         observer.observe(element);
       }
     });
   }
-  
+
   // Call initially and when scrolling stops
   observeAllElements();
-  
+
   // Add scroll listener with throttling
   let scrollTimeout: ReturnType<typeof setTimeout>;
-  window.addEventListener('scroll', () => {
+  window.addEventListener("scroll", () => {
     if (scrollTimeout) clearTimeout(scrollTimeout);
     scrollTimeout = setTimeout(observeAllElements, 500);
   });
-  
+
   return observer;
+}
+
+// Detect navigation in SPAs using URL change detection
+function setupSPADetection(): void {
+  let lastUrl = location.href;
+
+  // Create a new observer to watch for URL changes
+  const urlObserver = new MutationObserver(() => {
+    if (lastUrl !== location.href) {
+      console.log("URL changed from", lastUrl, "to", location.href);
+      lastUrl = location.href;
+
+      // chrome.storage.sync.get(
+      //   "translator_on",
+      //   (result: { translator_on?: boolean }) => {
+      //     isActiveTranslator = result.translator_on || false;
+
+      // If translator is active, process the new page content
+      if (isActiveTranslator) {
+        console.log("SPA navigation detected, starting translation");
+
+        // Clear existing translations when navigating
+        document.querySelectorAll(".translated").forEach((el) => {
+          el.remove();
+        });
+
+        // Make sure to reset progress tracking when navigating to a new page
+        resetTranslationProgress();
+
+        // Remove any existing progress indicator to start fresh
+        const existingProgress = document.getElementById(
+          "translation-progress"
+        );
+        if (existingProgress && existingProgress.parentNode) {
+          existingProgress.parentNode.removeChild(existingProgress);
+        }
+
+        // Process the new content
+        processVisibleElementsFirst();
+      }
+      //   }
+      // );
+    }
+  });
+
+  // Start observing
+  urlObserver.observe(document, {
+    subtree: true,
+    childList: true,
+  });
 }
 
 // Initialize and run
 function initialize(): void {
-  initializeState();
-  setupMessageListener();
-  setupMutationObserver();
-  setupLazyTranslation();
-  // Only process visible content initially
-  if (isActiveTranslator) {
-    processVisibleElementsFirst();
-  }
+  // Get the current state from storage
+  chrome.storage.sync.get(
+    "translator_on",
+    (result: { translator_on?: boolean }) => {
+      isActiveTranslator = result.translator_on || false;
+
+      // Set up all observers and listeners
+      setupMessageListener();
+      setupMutationObserver();
+      setupLazyTranslation();
+      setupSPADetection();
+
+      // If the translator is enabled on page load, automatically start translating
+      if (isActiveTranslator) {
+        console.log(
+          "Extension is ON, automatically starting translation after page load"
+        );
+
+        // Wait for page to be fully loaded before starting translation
+        if (document.readyState === "complete") {
+          processVisibleElementsFirst();
+        } else {
+          window.addEventListener("load", () => {
+            processVisibleElementsFirst();
+          });
+        }
+      }
+    }
+  );
 }
 
 // Start the extension
